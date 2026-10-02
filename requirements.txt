@@ -1,0 +1,7 @@
+haystack-ai>=2.13.0
+pyTelegramBotAPI>=4.22.1
+openai>=1.54.0
+pinecone>=3.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+loguru>=0.7.2
