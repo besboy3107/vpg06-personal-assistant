@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 # Глобальный порог косинусного сходства.
 # >= SIMILARITY_THRESHOLD → дубликат (action: updated/skipped)
 # <  SIMILARITY_THRESHOLD → новая информация (action: inserted)
-SIMILARITY_THRESHOLD = 0.85
+SIMILARITY_THRESHOLD = 0.9
 
 
 class PineconeManager:
@@ -77,9 +77,14 @@ class PineconeManager:
             log.info("Индекс %s создан.", self.index_name)
         return self.pc.Index(self.index_name)
 
-    def _check_similarity(self, vector: list[float]) -> Optional[dict[str, Any]]:
+    def _check_similarity(
+        self, vector: list[float], filter: Optional[dict[str, Any]] = None
+    ) -> Optional[dict[str, Any]]:
         """Возвращает ближайший вектор если score >= SIMILARITY_THRESHOLD, иначе None."""
-        results = self.index.query(vector=vector, top_k=1, include_metadata=True)
+        query_kwargs: dict[str, Any] = {"vector": vector, "top_k": 1, "include_metadata": True}
+        if filter:
+            query_kwargs["filter"] = filter
+        results = self.index.query(**query_kwargs)
         if results.matches and results.matches[0].score >= SIMILARITY_THRESHOLD:
             match = results.matches[0]
             return {"id": match.id, "score": float(match.score)}
@@ -103,6 +108,7 @@ class PineconeManager:
         vector: list[float],
         metadata: Optional[dict[str, Any]] = None,
         check_similarity: bool = True,
+        similarity_filter: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Записывает вектор в Pinecone с опциональной проверкой дубликатов.
 
@@ -119,7 +125,7 @@ class PineconeManager:
         }
 
         if check_similarity:
-            similar = self._check_similarity(vector)
+            similar = self._check_similarity(vector, filter=similarity_filter)
             if similar:
                 existing_id = similar["id"]
                 result["action"] = "updated"
@@ -156,11 +162,17 @@ class PineconeManager:
         text: str,
         metadata: Optional[dict[str, Any]] = None,
         check_similarity: bool = True,
+        similarity_filter: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        """Создаёт эмбеддинг для текста и записывает в базу."""
+        """Создаёт эмбеддинг для текста и записывает в базу.
+
+        Args:
+            similarity_filter: Pinecone filter для дедупликации только внутри подмножества,
+                например ``{"user_id": {"$eq": 123}}`` чтобы не сравнивать с чужими записями.
+        """
         vector = self.create_embedding(text)
         meta = {**(metadata or {}), "text": text}
-        return self.upsert_vector(doc_id, vector, meta, check_similarity)
+        return self.upsert_vector(doc_id, vector, meta, check_similarity, similarity_filter)
 
     def upsert_documents(
         self,
@@ -175,17 +187,38 @@ class PineconeManager:
 
     # ── Поиск ───────────────────────────────────────────────────────────────
 
-    def query_by_vector(self, vector: list[float], top_k: int = 5) -> list[dict[str, Any]]:
-        """Поиск по готовому вектору."""
-        response = self.index.query(vector=vector, top_k=top_k, include_metadata=True)
+    def query_by_vector(
+        self,
+        vector: list[float],
+        top_k: int = 5,
+        filter: Optional[dict[str, Any]] = None,
+    ) -> list[dict[str, Any]]:
+        """Поиск по готовому вектору.
+
+        Args:
+            filter: Pinecone metadata filter, например ``{"user_id": {"$eq": 123}}``.
+        """
+        query_kwargs: dict[str, Any] = {"vector": vector, "top_k": top_k, "include_metadata": True}
+        if filter:
+            query_kwargs["filter"] = filter
+        response = self.index.query(**query_kwargs)
         return [
             {"id": m.id, "score": float(m.score), "metadata": m.metadata or {}}
             for m in response.matches
         ]
 
-    def query_by_text(self, text: str, top_k: int = 5) -> list[dict[str, Any]]:
-        """Поиск по тексту — автоматически создаёт эмбеддинг."""
-        return self.query_by_vector(self.create_embedding(text), top_k)
+    def query_by_text(
+        self,
+        text: str,
+        top_k: int = 5,
+        filter: Optional[dict[str, Any]] = None,
+    ) -> list[dict[str, Any]]:
+        """Поиск по тексту — автоматически создаёт эмбеддинг.
+
+        Args:
+            filter: Pinecone metadata filter, например ``{"user_id": {"$eq": 123}}``.
+        """
+        return self.query_by_vector(self.create_embedding(text), top_k, filter=filter)
 
     # ── Чтение по ID ────────────────────────────────────────────────────────
 

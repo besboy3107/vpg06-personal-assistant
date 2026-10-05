@@ -168,8 +168,9 @@ def message_handler(msg: telebot.types.Message) -> None:
     user_text = msg.text.strip()
 
     try:
-        # 1. Получаем релевантные воспоминания из Pinecone
-        memories = memory.query_by_text(user_text, top_k=5)
+        # 1. Получаем релевантные воспоминания из Pinecone — ТОЛЬКО этого пользователя
+        user_filter = {"user_id": {"$eq": str(user_id)}}
+        memories = memory.query_by_text(user_text, top_k=5, filter=user_filter)
         context = "\n".join(
             f"- {m['metadata'].get('text', '')}"
             for m in memories
@@ -185,7 +186,7 @@ def message_handler(msg: telebot.types.Message) -> None:
         result = agent.run(messages=history + [ChatMessage.from_user(user_text)])
         response_text = (result.get("last_message") or ChatMessage.from_assistant("...")).text or ""
 
-        # 4. Сохраняем ТОЛЬКО текст пользователя в Pinecone
+        # 4. Сохраняем ТОЛЬКО текст пользователя в Pinecone (дедупликация per-user)
         mem_result = memory.upsert_document(
             f"{user_id}-{uuid.uuid4().hex[:12]}",
             user_text,
@@ -193,6 +194,7 @@ def message_handler(msg: telebot.types.Message) -> None:
                 "user_id": str(user_id),
                 "user_name": _user_label(msg.from_user),
             },
+            similarity_filter=user_filter,
         )
         log.info(
             "Память: action=%s | score=%s | '%s'",

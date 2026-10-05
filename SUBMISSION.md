@@ -60,6 +60,15 @@ $env:PYTHONUTF8=1; .\.venv\Scripts\python bot.py
 [INFO] Память: action=inserted | score=— | 'какая погода в москве'
 ```
 
+## Учтены замечания преподавателя (VPg06)
+
+| Замечание | Исправление |
+|---|---|
+| Фильтрация Pinecone по `user_id` — иначе агент получит воспоминания чужого пользователя | `query_by_text(..., filter={"user_id": {"$eq": str(user_id)}})` в `message_handler`; `upsert_document(..., similarity_filter=user_filter)` для per-user дедупликации |
+| Порог `0.9` в описании vs `0.85` в коде — нужно согласовать | `SIMILARITY_THRESHOLD = 0.9` в `pinecone_manager.py` (было `0.85`) |
+
+Также в `pinecone_manager.py` добавлен опциональный параметр `filter` в методы `_check_similarity`, `query_by_vector`, `query_by_text` и `similarity_filter` в `upsert_vector` / `upsert_document`.
+
 ## Учтены замечания преподавателя (VPg05)
 
 - Тест `pinecone_manager.py` проверяет именно пару «Хочу на Марс» / «Я полечу на Марс» из задания (а не произвольные фразы).
